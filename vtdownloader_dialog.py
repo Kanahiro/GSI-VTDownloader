@@ -26,19 +26,81 @@ import os
 
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
+from qgis.core import QgsProject, QgsPoint, QgsCoordinateReferenceSystem, QgsCoordinateTransform
 
-# This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
-FORM_CLASS, _ = uic.loadUiType(os.path.join(
-    os.path.dirname(__file__), 'vtdownloader_dialog_base.ui'))
+from . import settings
+from .gsi_geojson_generator import GsiGeojsonGenerator
 
+class VTDownloaderDialog(QtWidgets.QDialog):
+    SOURCE_LAYERS = settings.SOURCE_LAYERS
 
-class VTDownloaderDialog(QtWidgets.QDialog, FORM_CLASS):
-    def __init__(self, parent=None):
-        """Constructor."""
-        super(VTDownloaderDialog, self).__init__(parent)
-        # Set up the user interface from Designer through FORM_CLASS.
-        # After self.setupUi() you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
-        self.setupUi(self)
+    def __init__(self, iface):
+        super().__init__()
+        self.iface = iface
+
+        self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'vtdownloader_dialog_base.ui'), self)
+        self.ui.button_box.accepted.connect(self._accepted)
+        self.ui.button_box.rejected.connect(self._rejected)
+
+        self.init_sourcelayer_combobox()
+        self.ui.sourcelayer_combobox.currentIndexChanged.connect(self.reset_zoomlevel_combobox_by_selected_sourcelayer)
+        self.reset_zoomlevel_combobox_by_selected_sourcelayer()
+
+    def init_sourcelayer_combobox(self):
+        for layer_key in self.SOURCE_LAYERS:
+            layer_category = self.SOURCE_LAYERS[layer_key]['category']
+            layer_type = self.SOURCE_LAYERS[layer_key]['datatype']
+            combobox_str = '%s:%s(%s)'%(layer_key, layer_category, layer_type)
+            self.ui.sourcelayer_combobox.addItem(combobox_str, layer_key)
+
+    def reset_zoomlevel_combobox_by_selected_sourcelayer(self):
+        self.ui.zoomlevel_combobox.clear()
+
+        selected_layer_key = self.ui.sourcelayer_combobox.currentData()
+        minzoom = self.SOURCE_LAYERS[selected_layer_key]['minzoom']
+        maxzoom = self.SOURCE_LAYERS[selected_layer_key]['maxzoom']
+
+        for i in range(maxzoom - minzoom + 1):
+            self.ui.zoomlevel_combobox.addItem(str(i + minzoom), i + minzoom)
+
+    def get_leftbottom_lonlat(self):
+        extent = self.iface.mapCanvas().extent()
+        leftbottom_qgspoint = QgsPoint(extent.xMinimum(), extent.yMinimum())
+        
+        current_crs = QgsProject.instance().crs()
+        target_crs = QgsCoordinateReferenceSystem('EPSG:4326')
+        transform = QgsCoordinateTransform(current_crs, target_crs, QgsProject.instance())
+
+        leftbottom_qgspoint.transform(transform)
+        leftbottom_lonlat = [leftbottom_qgspoint.x(), leftbottom_qgspoint.y()]
+
+        return leftbottom_lonlat
+
+    def get_righttop_lonlat(self):
+        extent = self.iface.mapCanvas().extent()
+        righttop_qgspoint = QgsPoint(extent.xMaximum(), extent.yMaximum())
+        
+        current_crs = QgsProject.instance().crs()
+        target_crs = QgsCoordinateReferenceSystem('EPSG:4326')
+        transform = QgsCoordinateTransform(current_crs, target_crs, QgsProject.instance())
+
+        righttop_qgspoint.transform(transform)
+        righttop_lonlat = [righttop_qgspoint.x(), righttop_qgspoint.y()]
+
+        return righttop_lonlat
+
+    def _accepted(self):
+        leftbottom_lonlat = self.get_leftbottom_lonlat()
+        righttop_lonlat = self.get_righttop_lonlat()
+        layer_key = self.ui.sourcelayer_combobox.currentData()
+        zoomlevel = self.ui.zoomlevel_combobox.currentData()
+
+        ggg = GsiGeojsonGenerator(leftbottom_lonlat,
+                                    righttop_lonlat,
+                                    layer_key,
+                                    zoomlevel)
+        
+        self.close()
+
+    def _rejected(self):
+        self.close()
