@@ -30,6 +30,7 @@ from qgis.core import QgsProject, QgsPoint, QgsCoordinateReferenceSystem, QgsCoo
 
 from . import settings
 from .gsi_geojson_generator import GsiGeojsonGenerator
+from .rubberband_maptool import RubberbandMapTool
 
 class VTDownloaderDialog(QtWidgets.QDialog):
     SOURCE_LAYERS = settings.SOURCE_LAYERS
@@ -37,10 +38,12 @@ class VTDownloaderDialog(QtWidgets.QDialog):
     def __init__(self, iface):
         super().__init__()
         self.iface = iface
+        self.previous_map_tool = None
 
         self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'vtdownloader_dialog_base.ui'), self)
-        self.ui.button_box.accepted.connect(self._accepted)
-        self.ui.button_box.rejected.connect(self._rejected)
+        self.ui.maxAreaPushButton.clicked.connect(self._on_maxarea_pushbutton_clicked)
+        self.ui.rubberBandPushButton.clicked.connect(self._on_rubberband_pushbutton_clicked)
+        self.ui.closePushButton.clicked.connect(lambda:self.close())
 
         self.init_sourcelayer_combobox()
         self.ui.sourcelayer_combobox.currentIndexChanged.connect(self.reset_zoomlevel_combobox_by_selected_sourcelayer)
@@ -89,7 +92,7 @@ class VTDownloaderDialog(QtWidgets.QDialog):
 
         return righttop_lonlat
 
-    def _accepted(self):
+    def _on_maxarea_pushbutton_clicked(self):
         leftbottom_lonlat = self.get_leftbottom_lonlat()
         righttop_lonlat = self.get_righttop_lonlat()
         layer_key = self.ui.sourcelayer_combobox.currentData()
@@ -102,5 +105,32 @@ class VTDownloaderDialog(QtWidgets.QDialog):
         
         self.close()
 
-    def _rejected(self):
+    def _on_rubberband_pushbutton_clicked(self):
+        rubberband_tool = RubberbandMapTool(self.iface, self._on_rubberband_defined)
+        self.previous_map_tool = self.iface.mapCanvas().mapTool()
+        self.iface.mapCanvas().setMapTool(rubberband_tool)
+
+    def _on_rubberband_defined(self, start_qgspoint, end_qgspoint):
+        current_crs = QgsProject.instance().crs()
+        target_crs = QgsCoordinateReferenceSystem('EPSG:4326')
+        transform = QgsCoordinateTransform(current_crs, target_crs, QgsProject.instance())
+
+        start_qgspoint_4326 = start_qgspoint
+        start_qgspoint_4326.transform(transform)
+        end_qgspoint_4326 = end_qgspoint
+        end_qgspoint_4326.transform(transform)
+        
+        start_lonlat = [start_qgspoint_4326.x(), start_qgspoint_4326.y()]
+        end_lonlat = [end_qgspoint_4326.x(), end_qgspoint_4326.y()]
+
+        layer_key = self.ui.sourcelayer_combobox.currentData()
+        zoomlevel = self.ui.zoomlevel_combobox.currentData()
+
+        ggg = GsiGeojsonGenerator(start_lonlat,
+                                end_lonlat,
+                                layer_key,
+                                zoomlevel,
+                                is_clipmode=True)
+        
+        self.iface.mapCanvas().setMapTool(self.previous_map_tool)
         self.close()

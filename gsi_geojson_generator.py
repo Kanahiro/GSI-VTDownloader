@@ -19,7 +19,7 @@ from . import settings
 
 
 class GsiGeojsonGenerator:
-    def __init__(self, leftbottom_lonlat:list, righttop_lonlat:list, layer_key:str, zoomlevel:int):
+    def __init__(self, leftbottom_lonlat:list, righttop_lonlat:list, layer_key:str, zoomlevel:int, is_clipmode=False):
         self.leftbottom_lonlat = leftbottom_lonlat
         self.righttop_lonlat = righttop_lonlat
         self.layer_key = layer_key
@@ -70,11 +70,12 @@ class GsiGeojsonGenerator:
 
 
 class ProgressIndicator(QtWidgets.QDialog):
-    TMP_GEOJSON_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader', 'tmp.geojson')
     def __init__(self, tileindex, layer_key):
         super().__init__()
         self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'gsi_geojson_generator_indicator_base.ui'), self)
         self.layer_key = layer_key
+
+        self.ui.abortPushButton.clicked.connect(self.on_abort_pushbutton_clicked)
 
         self.dl_progressbar = self.ui.download_progressBar
         self.dcd_progressbar = self.ui.decode_progressBar
@@ -83,10 +84,10 @@ class ProgressIndicator(QtWidgets.QDialog):
         self.tile_downloader.progressChanged.connect(self.update_download_progress)
         self.tile_downloader.downloadFinished.connect(self.start_decode)
 
-        self.tile_decoder = TileDecoder(layer_key)
+        self.tile_decoder = TileDecoder(tileindex, layer_key)
         self.tile_decoder.progressChanged.connect(self.update_decode_progress)
         self.tile_decoder.geojsonCompleted.connect(lambda:self.add_geojson_to_proj())
-
+        
         self.tile_downloader.start()
 
     def update_download_progress(self, value):
@@ -101,9 +102,17 @@ class ProgressIndicator(QtWidgets.QDialog):
     def add_geojson_to_proj(self):
         vlayer = QgsVectorLayer(self.tile_decoder.geojson_str, self.layer_key, 'ogr')
         QgsProject.instance().addMapLayer(vlayer)
+        QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', 'Completed')
+        self.close()
 
-    def clip_vlayer_by_extent_of(self, leftbottom, righttop, vlayer:QgsVectorLayer):
-        pass
+    def clip_vlayer_by_extent_of(self, leftbottom, righttop, vlayer:QgsVectorLayer)->QgsVectorLayer:
+        return
+
+    def on_abort_pushbutton_clicked(self):
+        self.tile_downloader.quit()
+        self.tile_decoder.quit()
+        QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', '処理を中止しました')
+        self.close()
 
 
 class TileDownloader(QThread):
@@ -115,18 +124,23 @@ class TileDownloader(QThread):
     def __init__(self, tileindex):
         super().__init__()
         self.tileindex = tileindex
+        os.makedirs(os.path.join(self.TMP_PATH), exist_ok=True)
 
     def run(self):
-        shutil.rmtree(self.TMP_PATH)
         self.make_xyz_dirs()
         for i in range(len(self.tileindex)):
-            x = str(self.tileindex[i][0])
-            y = str(self.tileindex[i][1])
-            z = str(self.tileindex[i][2])
+            xyz = self.tileindex[i]
+            x = str(xyz[0])
+            y = str(xyz[1])
+            z = str(xyz[2])
             current_tileurl = self.TILE_URL
             current_tileurl = current_tileurl.replace(r'{z}', z).replace(r'{x}', x).replace(r'{y}', y)
             target_path = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
-            urllib.request.urlretrieve(current_tileurl, target_path)
+            
+            #download New file only
+            if not os.path.exists(target_path):
+                urllib.request.urlretrieve(current_tileurl, target_path)
+
             current_val = int( (i + 1) / len(self.tileindex) * 100 )
             self.progressChanged.emit(current_val)
 
@@ -144,8 +158,9 @@ class TileDecoder(QThread):
     progressChanged = pyqtSignal(int)
     geojsonCompleted = pyqtSignal(bool)
 
-    def __init__(self, layer_key):
+    def __init__(self, tileindex, layer_key):
         super().__init__()
+        self.tileindex = tileindex
         self.layer_key = layer_key
         self.geojson_str = ''
 
@@ -155,24 +170,20 @@ class TileDecoder(QThread):
         self.geojsonCompleted.emit(True)
 
     def decode_to_geojson(self):
-        z = os.listdir(self.TMP_PATH)[0]
-        x_dirs = os.listdir(os.path.join(self.TMP_PATH, z))
-        pbf_paths = []
-        for x in x_dirs:
-            pbf_paths += glob.glob(os.path.join(self.TMP_PATH, z, x, '*'))
-        
         #decoding start
         decoded_features = []
-        for i in range(len(pbf_paths)):
-            pbf = pbf_paths[i]
-            z = pbf.split(os.sep)[-3]
-            x = pbf.split(os.sep)[-2]
-            y = pbf.split(os.sep)[-1].split('.')[0]
+        for i in range(len(self.tileindex)):
+            xyz = self.tileindex[i]
+            x = str(xyz[0])
+            y = str(xyz[1])
+            z = str(xyz[2])
+
+            pbffile = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
         
             tippecanoe_path = '"' + os.path.join(os.path.dirname(os.path.realpath(__file__)), 'exlib', 'tippecanoe-decode') + '"'
             tippicanoe_output = subprocess.getoutput(
                 tippecanoe_path + ' '
-                + pbf + ' '
+                + pbffile + ' '
                 + z + ' '
                 + x + ' '
                 + y + ' '
@@ -182,7 +193,7 @@ class TileDecoder(QThread):
             if output_dict['features']:
                 decoded_features += output_dict['features'][0]['features']
             
-            current_val = int( (i + 1) / len(pbf_paths) * 100 )
+            current_val = int( (i + 1) / len(self.tileindex) * 100 )
             self.progressChanged.emit(current_val)
         
         geojson = {
