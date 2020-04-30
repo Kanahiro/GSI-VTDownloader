@@ -32,7 +32,7 @@ class RubberbandMapTool(QgsMapTool):
     def canvasReleaseEvent(self,e):
         endpoint = QPoint(e.pos().x(),e.pos().y())
 
-        start_pointxy = self.canvas.getCoordinateTransform().toMapPoint(self.startpoint.x(), self.startpoint.x())
+        start_pointxy = self.canvas.getCoordinateTransform().toMapPoint(self.startpoint.x(), self.startpoint.y())
         end_pointxy = self.canvas.getCoordinateTransform().toMapPoint(endpoint.x(), endpoint.y())
 
         start_qgspoint = QgsPoint(start_pointxy.x(), start_pointxy.y())
