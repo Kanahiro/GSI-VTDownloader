@@ -12,6 +12,7 @@ from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import QThread, pyqtSignal
 from qgis.core import QgsProject, QgsVectorLayer
+import processing
 
 from .exlib import tiletanic
 from .exlib.shapely import geometry as shapely_geometry
@@ -19,17 +20,27 @@ from . import settings
 
 
 class GsiGeojsonGenerator:
-    def __init__(self, leftbottom_lonlat:list, righttop_lonlat:list, layer_key:str, zoomlevel:int, is_clipmode=False):
+    def __init__(self, leftbottom_lonlat:list, righttop_lonlat:list, layer_key:str, zoomlevel:int, clipmode=False):
         self.leftbottom_lonlat = leftbottom_lonlat
         self.righttop_lonlat = righttop_lonlat
         self.layer_key = layer_key
         self.zoomlevel = zoomlevel
+        self.clipmode = clipmode
 
         self.run()
 
     def run(self):
         tileindex = self.make_tileindex()
-        indicator = ProgressIndicator(tileindex, self.layer_key)
+
+        bbox_xyMinMax = None
+        if self.clipmode:
+            xMin = self.leftbottom_lonlat[0]
+            xMax = self.righttop_lonlat[0]
+            yMin = self.leftbottom_lonlat[1]
+            yMax = self.righttop_lonlat[1]
+            bbox_xyMinMax = [xMin, xMax, yMin, yMax]
+
+        indicator = ProgressIndicator(tileindex, self.layer_key, bbox_xyMinMax)
         indicator.show()
 
     def make_tileindex(self):
@@ -70,10 +81,11 @@ class GsiGeojsonGenerator:
 
 
 class ProgressIndicator(QtWidgets.QDialog):
-    def __init__(self, tileindex, layer_key):
+    def __init__(self, tileindex, layer_key, bbox_xyMinMax=None):
         super().__init__()
         self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'gsi_geojson_generator_indicator_base.ui'), self)
         self.layer_key = layer_key
+        self.bbox_xyMinMax = bbox_xyMinMax
 
         self.ui.abortPushButton.clicked.connect(self.on_abort_pushbutton_clicked)
 
@@ -101,12 +113,23 @@ class ProgressIndicator(QtWidgets.QDialog):
 
     def add_geojson_to_proj(self):
         vlayer = QgsVectorLayer(self.tile_decoder.geojson_str, self.layer_key, 'ogr')
+        if self.bbox_xyMinMax:
+            vlayer = self.clip_vlayer(vlayer)
         QgsProject.instance().addMapLayer(vlayer)
         QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', 'Completed')
         self.close()
 
-    def clip_vlayer_by_extent_of(self, leftbottom, righttop, vlayer:QgsVectorLayer)->QgsVectorLayer:
-        return
+    def clip_vlayer(self, vlayer:QgsVectorLayer)->QgsVectorLayer:
+        cliped = processing.run('qgis:extractbyextent', {
+            'INPUT':vlayer,
+            'CLIP':False,
+            'EXTENT':'%s,%s,%s,%s'%(self.bbox_xyMinMax[0],
+                                    self.bbox_xyMinMax[1], 
+                                    self.bbox_xyMinMax[2], 
+                                    self.bbox_xyMinMax[3]),
+            'OUTPUT':'memory:'
+        })['OUTPUT']
+        return cliped
 
     def on_abort_pushbutton_clicked(self):
         self.tile_downloader.quit()

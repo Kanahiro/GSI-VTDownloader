@@ -106,9 +106,11 @@ class VTDownloaderDialog(QtWidgets.QDialog):
         self.close()
 
     def _on_rubberband_pushbutton_clicked(self):
+        QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', 'マウスドラッグで矩形を定義してください')
         rubberband_tool = RubberbandMapTool(self.iface, self._on_rubberband_defined)
         self.previous_map_tool = self.iface.mapCanvas().mapTool()
         self.iface.mapCanvas().setMapTool(rubberband_tool)
+        self.close()
 
     def _on_rubberband_defined(self, start_qgspoint, end_qgspoint):
         current_crs = QgsProject.instance().crs()
@@ -130,7 +132,7 @@ class VTDownloaderDialog(QtWidgets.QDialog):
                                 end_lonlat,
                                 layer_key,
                                 zoomlevel,
-                                is_clipmode=True)
+                                clipmode=True)
         
         self.iface.mapCanvas().setMapTool(self.previous_map_tool)
         self.close()

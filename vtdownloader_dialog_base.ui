@@ -83,7 +83,7 @@
      <item>
       <widget class="QPushButton" name="maxAreaPushButton">
        <property name="text">
-        <string>最大領域で実行</string>
+        <string>表示領域で実行</string>
        </property>
       </widget>
      </item>
