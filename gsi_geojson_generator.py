@@ -130,6 +130,7 @@ class ProgressIndicator(QtWidgets.QDialog):
         if self.bbox_xyMinMax:
             vlayer = self.clip_vlayer(vlayer)
         
+        vlayer.setName(self.layer_key)
         QgsProject.instance().addMapLayer(vlayer)
         QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', 'Completed')
         self.close()
