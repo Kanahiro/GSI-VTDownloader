@@ -5,12 +5,12 @@
 [general]
 name=GSI-VTDownloader
 qgisMinimumVersion=3.0
-description=A plugin to download GSI Vectortiles.
+description=A plugin to download and decode GSI Vectortiles.
 version=0.1
 author=Kanahiro Iguchi
 email=kanahiro.iguchi@gmail.com
 
-about=A plugin to download GSI-Vectortiles. User can choose zoom-level and source-layers to get.
+about=A plugin to download and decode GSI-Vectortiles. User can choose zoom-level and source-layers to be downloaded.
 
 tracker=https://github.com/Kanahiro/GSI-VTDownloader/issues
 repository=https://github.com/Kanahiro/GSI-VTDownloader
@@ -40,7 +40,7 @@ deprecated=False
 # plugin_dependencies=
 
 Category of the plugin: Raster, Vector, Database or Web
-# category=
+# category=Web
 
 # If the plugin can run on QGIS Server.
 server=False
