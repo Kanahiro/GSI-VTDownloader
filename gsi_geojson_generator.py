@@ -11,7 +11,7 @@ import json
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import QThread, pyqtSignal
-from qgis.core import QgsProject, QgsVectorLayer
+from qgis.core import QgsProject, QgsVectorLayer, QgsDataProvider
 import processing
 
 from .exlib import tiletanic
@@ -34,14 +34,19 @@ class GsiGeojsonGenerator:
 
         bbox_xyMinMax = None
         if self.clipmode:
-            xMin = self.leftbottom_lonlat[0]
-            xMax = self.righttop_lonlat[0]
-            yMin = self.leftbottom_lonlat[1]
-            yMax = self.righttop_lonlat[1]
-            bbox_xyMinMax = [xMin, xMax, yMin, yMax]
+            bbox_xyMinMax = self.make_bbox()
 
         indicator = ProgressIndicator(tileindex, self.layer_key, bbox_xyMinMax)
         indicator.show()
+
+    def make_bbox(self):
+        leftbottom_as_3857 = self.lonlat_to_webmercator(self.leftbottom_lonlat)
+        righttop_as_3857 = self.lonlat_to_webmercator(self.righttop_lonlat)
+        xMin = leftbottom_as_3857[0]
+        xMax = righttop_as_3857[0]
+        yMin = leftbottom_as_3857[1]
+        yMax = righttop_as_3857[1]
+        return [xMin, xMax, yMin, yMax]
 
     def make_tileindex(self):
         leftbottom_as_3857 = self.lonlat_to_webmercator(self.leftbottom_lonlat)
@@ -81,6 +86,7 @@ class GsiGeojsonGenerator:
 
 
 class ProgressIndicator(QtWidgets.QDialog):
+    TMP_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader')
     def __init__(self, tileindex, layer_key, bbox_xyMinMax=None):
         super().__init__()
         self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'gsi_geojson_generator_indicator_base.ui'), self)
@@ -103,7 +109,7 @@ class ProgressIndicator(QtWidgets.QDialog):
 
         self.tile_decoder = TileDecoder(tileindex, layer_key)
         self.tile_decoder.progressChanged.connect(self.update_decode_progress)
-        self.tile_decoder.geojsonCompleted.connect(lambda:self.add_geojson_to_proj())
+        self.tile_decoder.decodeFinished.connect(self.add_layer_to_proj)
         
         self.tile_downloader.start()
 
@@ -112,13 +118,15 @@ class ProgressIndicator(QtWidgets.QDialog):
 
     def update_decode_progress(self, value:int):
         self.dcd_progressbar.setValue(value)
+        if value == len(self.tileindex):
+            self.ui.abortPushButton.setEnabled(False)
 
     def start_decode(self):
         self.tile_decoder.start()
 
-    def add_geojson_to_proj(self):
-        vlayer = QgsVectorLayer(self.tile_decoder.geojson_str, self.layer_key, 'ogr')
-
+    def add_layer_to_proj(self):
+        vlayer = self.tile_decoder.mergedlayer
+        
         if self.bbox_xyMinMax:
             vlayer = self.clip_vlayer(vlayer)
         
@@ -166,10 +174,12 @@ class TileDownloader(QThread):
             current_tileurl = self.TILE_URL
             current_tileurl = current_tileurl.replace(r'{z}', z).replace(r'{x}', x).replace(r'{y}', y)
             target_path = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
-            
+
             #download New file only
             if not os.path.exists(target_path):
-                urllib.request.urlretrieve(current_tileurl, target_path)
+                pbfdata = urllib.request.urlopen(current_tileurl).read()
+                with open(target_path, mode='wb') as f:
+                    f.write(pbfdata)
 
             self.progressChanged.emit(i + 1)
 
@@ -185,22 +195,21 @@ class TileDownloader(QThread):
 class TileDecoder(QThread):
     TMP_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader')
     progressChanged = pyqtSignal(int)
-    geojsonCompleted = pyqtSignal(bool)
+    decodeFinished = pyqtSignal(bool)
 
     def __init__(self, tileindex, layer_key):
         super().__init__()
         self.tileindex = tileindex
         self.layer_key = layer_key
-        self.geojson_str = ''
+        self.mergedlayer = None
 
     def run(self):
-        geojson = self.decode_to_geojson()
-        self.geojson_str = json.dumps(geojson, ensure_ascii=False)
-        self.geojsonCompleted.emit(True)
+        self.mergedlayer = self.decode()
+        self.decodeFinished.emit(True)
 
-    def decode_to_geojson(self):
+    def decode(self):
         #decoding start
-        decoded_features = []
+        pbfuris = []
         for i in range(len(self.tileindex)):
             xyz = self.tileindex[i]
             x = str(xyz[0])
@@ -208,24 +217,33 @@ class TileDecoder(QThread):
             z = str(xyz[2])
 
             pbffile = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
-        
-            tippecanoe_path = '"' + os.path.join(os.path.dirname(os.path.realpath(__file__)), 'exlib', 'tippecanoe-decode') + '"'
-            tippicanoe_output = subprocess.getoutput(
-                tippecanoe_path + ' '
-                + pbffile + ' '
-                + z + ' '
-                + x + ' '
-                + y + ' '
-                + '--layer=' + self.layer_key)
-            output_dict = json.loads(tippicanoe_output)
-            
-            if output_dict['features']:
-                decoded_features += output_dict['features'][0]['features']
-            
+            SOURCE_LAYERS = settings.SOURCE_LAYERS
+            geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
+            pbfuri = pbffile + '|layername=' + self.layer_key + '|geometrytype=' + geometrytype
+            pbflayer = QgsVectorLayer(pbfuri, 'pbf', 'ogr')
+            pbfprovider = pbflayer.dataProvider()
+
+            if not pbfprovider.isValid():
+                continue
+
+            pbfuris.append(pbfuri)
             self.progressChanged.emit(i + 1)
         
-        geojson = {
-            'type':'FeatureCollection',
-            'features':decoded_features
-        }
-        return geojson
+        mergedlayer_shp = processing.run('saga:mergevectorlayers', {
+            'INPUT':pbfuris,
+            'MATCH':True,
+            'MERGED':'TEMPORARY_OUTPUT',
+            'SRCINFO':True
+        })['MERGED']
+        #always 3857
+        mergedlayer = QgsVectorLayer(mergedlayer_shp, self.layer_key, 'ogr')
+
+        return mergedlayer
+
+    def translate_gsitype_to_geometry(self, gsitype):
+        if gsitype == '点':
+            return 'Point'
+        elif gsitype == '線':
+            return 'LineString'
+        else:
+            return 'Polygon'
