@@ -85,12 +85,17 @@ class ProgressIndicator(QtWidgets.QDialog):
         super().__init__()
         self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'gsi_geojson_generator_indicator_base.ui'), self)
         self.layer_key = layer_key
+        self.tileindex = tileindex
         self.bbox_xyMinMax = bbox_xyMinMax
 
         self.ui.abortPushButton.clicked.connect(self.on_abort_pushbutton_clicked)
 
         self.dl_progressbar = self.ui.download_progressBar
+        self.dl_progressbar.setRange(0, len(self.tileindex))
+        self.dl_progressbar.setFormat('%v/%m(%p%)')
         self.dcd_progressbar = self.ui.decode_progressBar
+        self.dcd_progressbar.setRange(0, len(self.tileindex))
+        self.dcd_progressbar.setFormat('%v/%m(%p%)')
 
         self.tile_downloader = TileDownloader(tileindex)
         self.tile_downloader.progressChanged.connect(self.update_download_progress)
@@ -102,10 +107,10 @@ class ProgressIndicator(QtWidgets.QDialog):
         
         self.tile_downloader.start()
 
-    def update_download_progress(self, value):
+    def update_download_progress(self, value:int):
         self.dl_progressbar.setValue(value)
 
-    def update_decode_progress(self, value):
+    def update_decode_progress(self, value:int):
         self.dcd_progressbar.setValue(value)
 
     def start_decode(self):
@@ -113,8 +118,10 @@ class ProgressIndicator(QtWidgets.QDialog):
 
     def add_geojson_to_proj(self):
         vlayer = QgsVectorLayer(self.tile_decoder.geojson_str, self.layer_key, 'ogr')
+
         if self.bbox_xyMinMax:
             vlayer = self.clip_vlayer(vlayer)
+        
         QgsProject.instance().addMapLayer(vlayer)
         QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', 'Completed')
         self.close()
@@ -164,8 +171,7 @@ class TileDownloader(QThread):
             if not os.path.exists(target_path):
                 urllib.request.urlretrieve(current_tileurl, target_path)
 
-            current_val = int( (i + 1) / len(self.tileindex) * 100 )
-            self.progressChanged.emit(current_val)
+            self.progressChanged.emit(i + 1)
 
         self.downloadFinished.emit(True)
 
@@ -216,8 +222,7 @@ class TileDecoder(QThread):
             if output_dict['features']:
                 decoded_features += output_dict['features'][0]['features']
             
-            current_val = int( (i + 1) / len(self.tileindex) * 100 )
-            self.progressChanged.emit(current_val)
+            self.progressChanged.emit(i + 1)
         
         geojson = {
             'type':'FeatureCollection',
