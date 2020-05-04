@@ -121,7 +121,7 @@ class GsiGeojsonGenerator(QtWidgets.QDialog):
         return cliped
 
     def on_abort_pushbutton_clicked(self):
-        self.tile_downloader.quit()
+        self.tile_downloader.terminate()
         QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', '処理を中止しました')
         self.close()
 
