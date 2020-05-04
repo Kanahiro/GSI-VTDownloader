@@ -23,6 +23,7 @@
 """
 
 import os
+import time
 
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
@@ -102,6 +103,7 @@ class VTDownloaderDialog(QtWidgets.QDialog):
                                     righttop_lonlat,
                                     layer_key,
                                     zoomlevel)
+        ggg.run()
         
         self.close()
 
@@ -133,6 +135,7 @@ class VTDownloaderDialog(QtWidgets.QDialog):
                                 layer_key,
                                 zoomlevel,
                                 clipmode=True)
-        
+        ggg.run()
+
         self.iface.mapCanvas().setMapTool(self.previous_map_tool)
         self.close()

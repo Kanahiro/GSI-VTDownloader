@@ -7,6 +7,7 @@ import urllib
 import glob
 import subprocess
 import json
+import copy
 
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
@@ -18,26 +19,34 @@ from .exlib import tiletanic
 from .exlib.shapely import geometry as shapely_geometry
 from . import settings
 
+TMP_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader')
 
-class GsiGeojsonGenerator:
+
+class GsiGeojsonGenerator(QtWidgets.QDialog):
     def __init__(self, leftbottom_lonlat:list, righttop_lonlat:list, layer_key:str, zoomlevel:int, clipmode=False):
+        super().__init__()
+        os.makedirs(os.path.join(TMP_PATH), exist_ok=True)
+        self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'gsi_geojson_generator_indicator_base.ui'), self)
+
         self.leftbottom_lonlat = leftbottom_lonlat
         self.righttop_lonlat = righttop_lonlat
         self.layer_key = layer_key
         self.zoomlevel = zoomlevel
         self.clipmode = clipmode
 
-        self.run()
+        self.tileindex = self.make_tileindex()
+
+        self.ui.abortPushButton.clicked.connect(self.on_abort_pushbutton_clicked)
+        self.ui.download_progressBar.setRange(0, len(self.tileindex))
+        self.ui.download_progressBar.setFormat('%v/%m(%p%)')
+
+        self.tile_downloader = TileDownloader(self.tileindex, self.layer_key)
+        self.tile_downloader.progressChanged.connect(self.update_download_progress)
+        self.tile_downloader.downloadFinished.connect(lambda:self.add_layer_to_proj())
 
     def run(self):
-        tileindex = self.make_tileindex()
-
-        bbox_xyMinMax = None
-        if self.clipmode:
-            bbox_xyMinMax = self.make_bbox()
-
-        indicator = ProgressIndicator(tileindex, self.layer_key, bbox_xyMinMax)
-        indicator.show()
+        self.show()
+        self.tile_downloader.start()
 
     def make_bbox(self):
         leftbottom_as_3857 = self.lonlat_to_webmercator(self.leftbottom_lonlat)
@@ -84,72 +93,35 @@ class GsiGeojsonGenerator:
         }
         return rectangle
 
-
-class ProgressIndicator(QtWidgets.QDialog):
-    TMP_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader')
-    def __init__(self, tileindex, layer_key, bbox_xyMinMax=None):
-        super().__init__()
-        self.ui = uic.loadUi(os.path.join(os.path.dirname(__file__), 'gsi_geojson_generator_indicator_base.ui'), self)
-        self.layer_key = layer_key
-        self.tileindex = tileindex
-        self.bbox_xyMinMax = bbox_xyMinMax
-
-        self.ui.abortPushButton.clicked.connect(self.on_abort_pushbutton_clicked)
-
-        self.dl_progressbar = self.ui.download_progressBar
-        self.dl_progressbar.setRange(0, len(self.tileindex))
-        self.dl_progressbar.setFormat('%v/%m(%p%)')
-        self.dcd_progressbar = self.ui.decode_progressBar
-        self.dcd_progressbar.setRange(0, len(self.tileindex))
-        self.dcd_progressbar.setFormat('%v/%m(%p%)')
-
-        self.tile_downloader = TileDownloader(tileindex)
-        self.tile_downloader.progressChanged.connect(self.update_download_progress)
-        self.tile_downloader.downloadFinished.connect(self.start_decode)
-
-        self.tile_decoder = TileDecoder(tileindex, layer_key)
-        self.tile_decoder.progressChanged.connect(self.update_decode_progress)
-        self.tile_decoder.decodeFinished.connect(self.add_layer_to_proj)
-        
-        self.tile_downloader.start()
-
     def update_download_progress(self, value:int):
-        self.dl_progressbar.setValue(value)
-
-    def update_decode_progress(self, value:int):
-        self.dcd_progressbar.setValue(value)
-        if value == len(self.tileindex):
-            self.ui.abortPushButton.setEnabled(False)
-
-    def start_decode(self):
-        self.tile_decoder.start()
+        self.ui.download_progressBar.setValue(value)
 
     def add_layer_to_proj(self):
-        vlayer = self.tile_decoder.mergedlayer
+        vlayer = self.tile_downloader.mergedlayer
         
-        if self.bbox_xyMinMax:
-            vlayer = self.clip_vlayer(vlayer)
+        if self.clipmode:
+            bbox = self.make_bbox()
+            vlayer = self.clip_vlayer(bbox, vlayer)
         
         vlayer.setName(self.layer_key)
         QgsProject.instance().addMapLayer(vlayer)
         QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', 'Completed')
         self.close()
 
-    def clip_vlayer(self, vlayer:QgsVectorLayer)->QgsVectorLayer:
+    def clip_vlayer(self, bbox, vlayer:QgsVectorLayer)->QgsVectorLayer:
         cliped = processing.run('qgis:extractbyextent', {
             'INPUT':vlayer,
             'CLIP':False,
-            'EXTENT':'%s,%s,%s,%s'%(self.bbox_xyMinMax[0],
-                                    self.bbox_xyMinMax[1], 
-                                    self.bbox_xyMinMax[2], 
-                                    self.bbox_xyMinMax[3]),
+            'EXTENT':'%s,%s,%s,%s'%(bbox[0],
+                                    bbox[1], 
+                                    bbox[2], 
+                                    bbox[3]),
             'OUTPUT':'memory:'
         })['OUTPUT']
         return cliped
 
     def on_abort_pushbutton_clicked(self):
         self.tile_downloader.quit()
-        self.tile_decoder.quit()
         QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', '処理を中止しました')
         self.close()
 
@@ -160,13 +132,16 @@ class TileDownloader(QThread):
     progressChanged = pyqtSignal(int)
     downloadFinished = pyqtSignal(bool)
 
-    def __init__(self, tileindex):
+    def __init__(self, tileindex, layer_key):
         super().__init__()
         self.tileindex = tileindex
-        os.makedirs(os.path.join(self.TMP_PATH), exist_ok=True)
+        self.layer_key = layer_key
+        self.mergedlayer = None
 
     def run(self):
         self.make_xyz_dirs()
+
+        pbfuris = []
         for i in range(len(self.tileindex)):
             xyz = self.tileindex[i]
             x = str(xyz[0])
@@ -182,45 +157,9 @@ class TileDownloader(QThread):
                 with open(target_path, mode='wb') as f:
                     f.write(pbfdata)
 
-            self.progressChanged.emit(i + 1)
-
-        self.downloadFinished.emit(True)
-
-    def make_xyz_dirs(self):
-        for xyz in self.tileindex:
-            x = str(xyz[0])
-            z = str(xyz[2])
-            os.makedirs(os.path.join(self.TMP_PATH, z, x), exist_ok=True)
-
-
-class TileDecoder(QThread):
-    TMP_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader')
-    progressChanged = pyqtSignal(int)
-    decodeFinished = pyqtSignal(bool)
-
-    def __init__(self, tileindex, layer_key):
-        super().__init__()
-        self.tileindex = tileindex
-        self.layer_key = layer_key
-        self.mergedlayer = None
-
-    def run(self):
-        self.mergedlayer = self.decode()
-        self.decodeFinished.emit(True)
-
-    def decode(self):
-        #decoding start
-        pbfuris = []
-        for i in range(len(self.tileindex)):
-            xyz = self.tileindex[i]
-            x = str(xyz[0])
-            y = str(xyz[1])
-            z = str(xyz[2])
-
-            pbffile = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
             SOURCE_LAYERS = settings.SOURCE_LAYERS
             geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
-            pbfuri = pbffile + '|layername=' + self.layer_key + '|geometrytype=' + geometrytype
+            pbfuri = target_path + '|layername=' + self.layer_key + '|geometrytype=' + geometrytype
             pbflayer = QgsVectorLayer(pbfuri, 'pbf', 'ogr')
             pbfprovider = pbflayer.dataProvider()
 
@@ -228,6 +167,7 @@ class TileDecoder(QThread):
                 continue
 
             pbfuris.append(pbfuri)
+
             self.progressChanged.emit(i + 1)
         
         mergedlayer_shp = processing.run('saga:mergevectorlayers', {
@@ -237,9 +177,15 @@ class TileDecoder(QThread):
             'SRCINFO':True
         })['MERGED']
         #always 3857
-        mergedlayer = QgsVectorLayer(mergedlayer_shp, self.layer_key, 'ogr')
+        self.mergedlayer = QgsVectorLayer(mergedlayer_shp, self.layer_key, 'ogr')
 
-        return mergedlayer
+        self.downloadFinished.emit(True)
+
+    def make_xyz_dirs(self):
+        for xyz in self.tileindex:
+            x = str(xyz[0])
+            z = str(xyz[2])
+            os.makedirs(os.path.join(self.TMP_PATH, z, x), exist_ok=True)
 
     def translate_gsitype_to_geometry(self, gsitype):
         if gsitype == '点':
