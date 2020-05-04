@@ -8,6 +8,7 @@ import glob
 import subprocess
 import json
 import copy
+import socket
 
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
@@ -152,13 +153,15 @@ class TileDownloader(QThread):
             target_path = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
 
             #download New file only
-            if not os.path.exists(target_path):
+            while (not os.path.exists(target_path)):
                 try:
-                    pbfdata = urllib.request.urlopen(current_tileurl).read()
+                    pbfdata = urllib.request.urlopen(current_tileurl, timeout=5).read()
                     with open(target_path, mode='wb') as f:
                         f.write(pbfdata)
                 except urllib.error.HTTPError:
-                    continue
+                    break
+                except socket.timeout:
+                    print('timeout')
 
             SOURCE_LAYERS = settings.SOURCE_LAYERS
             geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
