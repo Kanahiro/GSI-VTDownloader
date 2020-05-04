@@ -153,9 +153,12 @@ class TileDownloader(QThread):
 
             #download New file only
             if not os.path.exists(target_path):
-                pbfdata = urllib.request.urlopen(current_tileurl).read()
-                with open(target_path, mode='wb') as f:
-                    f.write(pbfdata)
+                try:
+                    pbfdata = urllib.request.urlopen(current_tileurl).read()
+                    with open(target_path, mode='wb') as f:
+                        f.write(pbfdata)
+                except urllib.error.HTTPError:
+                    continue
 
             SOURCE_LAYERS = settings.SOURCE_LAYERS
             geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
