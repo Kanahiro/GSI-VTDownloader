@@ -1,5 +1,7 @@
 # GSI-VTDownloader
 
+<img src='./imgs/sample.gif'>
+
 QGISで国土地理院ベクトルタイルをダウンロードしてベクターレイヤとして追加するためのプラグイン
 
 ## 使い方
