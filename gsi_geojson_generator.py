@@ -170,14 +170,18 @@ class TileDownloader(QThread):
 
             self.progressChanged.emit(i + 1)
         
-        mergedlayer_shp = processing.run('saga:mergevectorlayers', {
-            'INPUT':pbfuris,
-            'MATCH':True,
-            'MERGED':'TEMPORARY_OUTPUT',
-            'SRCINFO':True
-        })['MERGED']
-        #always 3857
-        self.mergedlayer = QgsVectorLayer(mergedlayer_shp, self.layer_key, 'ogr')
+
+        if len(pbfuris) == 1:
+            self.mergedlayer = QgsVectorLayer(pbfuris[0], self.layer_key, 'ogr')
+        else:
+            mergedlayer_shp = processing.run('saga:mergevectorlayers', {
+                'INPUT':pbfuris,
+                'MATCH':True,
+                'MERGED':'TEMPORARY_OUTPUT',
+                'SRCINFO':True
+            })['MERGED']
+            #always 3857
+            self.mergedlayer = QgsVectorLayer(mergedlayer_shp, self.layer_key, 'ogr')
 
         self.downloadFinished.emit(True)
 
