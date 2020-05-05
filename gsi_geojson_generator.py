@@ -21,7 +21,7 @@ from .exlib.shapely import geometry as shapely_geometry
 from . import settings
 
 TMP_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader')
-
+SOURCE_LAYERS = settings.SOURCE_LAYERS
 
 class GsiGeojsonGenerator(QtWidgets.QDialog):
     def __init__(self, leftbottom_lonlat:list, righttop_lonlat:list, layer_key:str, zoomlevel:int, clipmode=False):
@@ -37,7 +37,7 @@ class GsiGeojsonGenerator(QtWidgets.QDialog):
 
         self.tileindex = self.make_tileindex()
 
-        self.ui.abortPushButton.clicked.connect(self.on_abort_pushbutton_clicked)
+        self.ui.abortPushButton.clicked.connect(lambda:self.on_abort_pushbutton_clicked())
         self.ui.download_progressBar.setRange(0, len(self.tileindex))
         self.ui.download_progressBar.setFormat('%v/%m(%p%)')
 
@@ -164,36 +164,42 @@ class TileDownloader(QThread):
             current_tileurl = current_tileurl.replace(r'{z}', z).replace(r'{x}', x).replace(r'{y}', y)
             target_path = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
             
+            print(current_tileurl)
+            if os.path.exists(target_path) and os.path.getsize(target_path) == 0:
+                print('remove')
+                os.remove(target_path)
+
             #download New file only
             if not os.path.exists(target_path):
                 pbfdata = None
                 while (pbfdata is None):
-                    print(current_tileurl)
                     try:
-                        pbfdata = urllib.request.urlopen(current_tileurl, timeout=5)
+                        pbfdata = urllib.request.urlopen(current_tileurl, timeout=5).read()
                     except socket.timeout:
                         print('timeout')
                     except urllib.error.HTTPError as e:
                         print(e.code)
                         break
                     except:
-                        print('unknown error')
+                        print('unknown download error')
                         break
                 #when not 404
                 if pbfdata:
                     with open(target_path, mode='wb') as f:
-                        f.write(pbfdata.read())
+                        f.write(pbfdata)
 
             if not os.path.exists(target_path):
                 continue
+            
+            pbfuri = ''
+            try:
+                geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
+                pbfuri = target_path + '|layername=' + self.layer_key + '|geometrytype=' + geometrytype
+                pbflayer = QgsVectorLayer(pbfuri, 'pbf', 'ogr')
+            except:
+                print('unknown decode error')
 
-            SOURCE_LAYERS = settings.SOURCE_LAYERS
-            geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
-            pbfuri = target_path + '|layername=' + self.layer_key + '|geometrytype=' + geometrytype
-            pbflayer = QgsVectorLayer(pbfuri, 'pbf', 'ogr')
-            pbfprovider = pbflayer.dataProvider()
-
-            if pbfprovider.isValid():
+            if pbflayer.dataProvider().isValid():
                 pbfuris.append(pbfuri)
 
         self.downloadFinished.emit()
