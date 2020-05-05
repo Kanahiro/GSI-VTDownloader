@@ -42,7 +42,7 @@ class GsiGeojsonGenerator(QtWidgets.QDialog):
         self.ui.download_progressBar.setFormat('%v/%m(%p%)')
 
         self.tile_downloader = TileDownloader(self.tileindex, self.layer_key)
-        self.tile_downloader.progressChanged.connect(self.update_download_progress)
+        self.tile_downloader.progressChanged.connect(lambda value:self.update_download_progress(value))
         self.tile_downloader.downloadFinished.connect(lambda:self.add_layer_to_proj())
 
     def run(self):
@@ -159,7 +159,7 @@ class TileDownloader(QThread):
                     with open(target_path, mode='wb') as f:
                         f.write(pbfdata)
                 except urllib.error.HTTPError:
-                    break
+                    continue
                 except socket.timeout:
                     print('timeout')
 
@@ -182,9 +182,9 @@ class TileDownloader(QThread):
         else:
             mergedlayer_shp = processing.run('saga:mergevectorlayers', {
                 'INPUT':pbfuris,
-                'MATCH':True,
+                'MATCH':False,
                 'MERGED':'TEMPORARY_OUTPUT',
-                'SRCINFO':True
+                'SRCINFO':False
             })['MERGED']
             #always 3857
             self.mergedlayer = QgsVectorLayer(mergedlayer_shp, self.layer_key, 'ogr')
