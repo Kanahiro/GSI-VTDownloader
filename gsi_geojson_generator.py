@@ -43,7 +43,8 @@ class GsiGeojsonGenerator(QtWidgets.QDialog):
 
         self.tile_downloader = TileDownloader(self.tileindex, self.layer_key)
         self.tile_downloader.progressChanged.connect(lambda value:self.update_download_progress(value))
-        self.tile_downloader.downloadFinished.connect(lambda:self.add_layer_to_proj())
+        self.tile_downloader.decodeFinished.connect(lambda:self.add_layer_to_proj())
+        self.tile_downloader.downloadFinished.connect(lambda:self.update_button_disable_and_newtext())
 
     def run(self):
         self.show()
@@ -97,9 +98,18 @@ class GsiGeojsonGenerator(QtWidgets.QDialog):
     def update_download_progress(self, value:int):
         self.ui.download_progressBar.setValue(value)
 
+    def update_button_disable_and_newtext(self):
+        self.ui.abortPushButton.setEnabled(False)
+        self.ui.abortPushButton.setText("変換中…")
+
     def add_layer_to_proj(self):
         vlayer = self.tile_downloader.mergedlayer
         
+        if vlayer is None:
+            QtWidgets.QMessageBox.information(None, 'GSI-VTDownloader', '指定領域のタイルには有効な地物が存在しませんでした')
+            self.close()
+            return
+
         if self.clipmode:
             bbox = self.make_bbox()
             vlayer = self.clip_vlayer(bbox, vlayer)
@@ -131,7 +141,8 @@ class TileDownloader(QThread):
     TMP_PATH = os.path.join(tempfile.gettempdir(), 'vtdownloader')
     TILE_URL = r'https://cyberjapandata.gsi.go.jp/xyz/experimental_bvmap/{z}/{x}/{y}.pbf'
     progressChanged = pyqtSignal(int)
-    downloadFinished = pyqtSignal(bool)
+    downloadFinished = pyqtSignal()
+    decodeFinished = pyqtSignal()
 
     def __init__(self, tileindex, layer_key):
         super().__init__()
@@ -144,6 +155,7 @@ class TileDownloader(QThread):
 
         pbfuris = []
         for i in range(len(self.tileindex)):
+            self.progressChanged.emit(i + 1)
             xyz = self.tileindex[i]
             x = str(xyz[0])
             y = str(xyz[1])
@@ -151,17 +163,29 @@ class TileDownloader(QThread):
             current_tileurl = self.TILE_URL
             current_tileurl = current_tileurl.replace(r'{z}', z).replace(r'{x}', x).replace(r'{y}', y)
             target_path = os.path.join(self.TMP_PATH, z, x, y + '.pbf')
-
+            
             #download New file only
-            while (not os.path.exists(target_path)):
-                try:
-                    pbfdata = urllib.request.urlopen(current_tileurl, timeout=5).read()
+            if not os.path.exists(target_path):
+                pbfdata = None
+                while (pbfdata is None):
+                    print(current_tileurl)
+                    try:
+                        pbfdata = urllib.request.urlopen(current_tileurl, timeout=5)
+                    except socket.timeout:
+                        print('timeout')
+                    except urllib.error.HTTPError as e:
+                        print(e.code)
+                        break
+                    except:
+                        print('unknown error')
+                        break
+                #when not 404
+                if pbfdata:
                     with open(target_path, mode='wb') as f:
-                        f.write(pbfdata)
-                except urllib.error.HTTPError:
-                    continue
-                except socket.timeout:
-                    print('timeout')
+                        f.write(pbfdata.read())
+
+            if not os.path.exists(target_path):
+                continue
 
             SOURCE_LAYERS = settings.SOURCE_LAYERS
             geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
@@ -169,15 +193,14 @@ class TileDownloader(QThread):
             pbflayer = QgsVectorLayer(pbfuri, 'pbf', 'ogr')
             pbfprovider = pbflayer.dataProvider()
 
-            if not pbfprovider.isValid():
-                continue
+            if pbfprovider.isValid():
+                pbfuris.append(pbfuri)
 
-            pbfuris.append(pbfuri)
+        self.downloadFinished.emit()
 
-            self.progressChanged.emit(i + 1)
-        
-
-        if len(pbfuris) == 1:
+        if pbfuris == []:
+            return
+        elif len(pbfuris) == 1:
             self.mergedlayer = QgsVectorLayer(pbfuris[0], self.layer_key, 'ogr')
         else:
             mergedlayer_shp = processing.run('saga:mergevectorlayers', {
@@ -189,7 +212,7 @@ class TileDownloader(QThread):
             #always 3857
             self.mergedlayer = QgsVectorLayer(mergedlayer_shp, self.layer_key, 'ogr')
 
-        self.downloadFinished.emit(True)
+        self.decodeFinished.emit()
 
     def make_xyz_dirs(self):
         for xyz in self.tileindex:
