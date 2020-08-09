@@ -153,7 +153,7 @@ class TileDownloader(QThread):
     def run(self):
         self.make_xyz_dirs()
 
-        pbfuris = []
+        pbflayers = []
         for i in range(len(self.tileindex)):
             self.progressChanged.emit(i + 1)
             xyz = self.tileindex[i]
@@ -191,7 +191,7 @@ class TileDownloader(QThread):
             if not os.path.exists(target_path):
                 continue
             
-            pbfuri = ''
+            pbflayer = None
             try:
                 geometrytype = self.translate_gsitype_to_geometry(SOURCE_LAYERS[self.layer_key]['datatype'])
                 pbfuri = target_path + '|layername=' + self.layer_key + '|geometrytype=' + geometrytype
@@ -200,24 +200,24 @@ class TileDownloader(QThread):
                 print('unknown decode error')
 
             if pbflayer.dataProvider().isValid():
-                pbfuris.append(pbfuri)
+                pbflayers.append(pbflayer)
 
         self.downloadFinished.emit()
 
-        if pbfuris == []:
+        if pbflayers == []:
             return
-        elif len(pbfuris) == 1:
-            self.mergedlayer = QgsVectorLayer(pbfuris[0], self.layer_key, 'ogr')
+        elif len(pbflayers) == 1:
+            self.mergedlayer = QgsVectorLayer(pbflayers[0], self.layer_key, 'ogr')
         else:
             #基本nativeで、エラー出るならsagaでマージ
             try:
                 self.mergedlayer = processing.run('native:mergevectorlayers', {
-                    'LAYERS':pbfuris,                
+                    'LAYERS':pbflayers,                
                     'OUTPUT':'TEMPORARY_OUTPUT',
                 })['OUTPUT']
             except:
                 mergedlayer_shp = processing.run('saga:mergevectorlayers', {
-                    'INPUT':pbfuris,
+                    'INPUT':pbflayers,
                     'MATCH':False,
                     'MERGED':'TEMPORARY_OUTPUT',
                     'SRCINFO':False

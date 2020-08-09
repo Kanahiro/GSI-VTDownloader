@@ -120,3 +120,8 @@ SOURCE_LAYERS = {
         'maxzoom':16
     }
 }
+
+from qgis.PyQt.QtCore import QVariant
+FIELD_TYPES = {
+    "ftCode":QVariant.Int
+}
