@@ -5,12 +5,12 @@
 [general]
 name=GSI-VTDownloader
 qgisMinimumVersion=3.0
-description=A plugin to download and decode GSI Vectortiles.
+description=地理院ベクトルタイルをダウンロードしベクターレイヤーとして読み込むためのプラグイン。A plugin to download and decode GSI Vectortiles.
 version=0.1
 author=Kanahiro Iguchi
 email=kanahiro.iguchi@gmail.com
 
-about=A plugin to download and decode GSI-Vectortiles. User can choose zoom-level and source-layers to be downloaded.
+about=A plugin to download and decode GSI-Vectortiles. User can choose zoom-level and source-layers to be downloaded. GSI is one of Japanese Governmental Organizations, stands for Geospatial Information Authority of Japan. https://www.gsi.go.jp/
 
 tracker=https://github.com/Kanahiro/GSI-VTDownloader/issues
 repository=https://github.com/Kanahiro/GSI-VTDownloader
