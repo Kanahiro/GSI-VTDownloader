@@ -6,7 +6,7 @@
 name=GSI-VTDownloader
 qgisMinimumVersion=3.0
 description=地理院ベクトルタイルをダウンロードしベクターレイヤーとして読み込むためのプラグイン。A plugin to download and decode GSI Vectortiles.
-version=0.1
+version=0.2
 author=Kanahiro Iguchi
 email=kanahiro.iguchi@gmail.com
 
