@@ -209,7 +209,7 @@ class TileDownloader(QThread):
                 print('unknown decode error')
 
             if pbflayer.dataProvider().isValid():
-                #{'expression': '"orgGILvl"', 'length': 0, 'name': 'orgGILvl', 'precision': 0, 'type': 10}, 
+                #{'expression': '"orgGILvl"', 'length': 0, 'name': 'orgGILvl', 'precision': 0, 'type': 10},
                 expressions = []
                 fields = pbflayer.dataProvider().fields()
                 for i in range(fields.count()):
