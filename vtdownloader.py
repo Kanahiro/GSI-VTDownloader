@@ -46,17 +46,6 @@ class VTDownloader:
         self.iface = iface
         # initialize plugin directory
         self.plugin_dir = os.path.dirname(__file__)
-        # initialize locale
-        locale = QSettings().value('locale/userLocale')[0:2]
-        locale_path = os.path.join(
-            self.plugin_dir,
-            'i18n',
-            'VTDownloader_{}.qm'.format(locale))
-
-        if os.path.exists(locale_path):
-            self.translator = QTranslator()
-            self.translator.load(locale_path)
-            QCoreApplication.installTranslator(self.translator)
 
         # Declare instance attributes
         self.actions = []
@@ -81,18 +70,17 @@ class VTDownloader:
         # noinspection PyTypeChecker,PyArgumentList,PyCallByClass
         return QCoreApplication.translate('VTDownloader', message)
 
-
     def add_action(
-        self,
-        icon_path,
-        text,
-        callback,
-        enabled_flag=True,
-        add_to_menu=True,
-        add_to_toolbar=True,
-        status_tip=None,
-        whats_this=None,
-        parent=None):
+            self,
+            icon_path,
+            text,
+            callback,
+            enabled_flag=True,
+            add_to_menu=True,
+            add_to_toolbar=True,
+            status_tip=None,
+            whats_this=None,
+            parent=None):
         """Add a toolbar icon to the toolbar.
 
         :param icon_path: Path to the icon for this action. Can be a resource
@@ -159,16 +147,14 @@ class VTDownloader:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
 
-        icon_path = ':/plugins/vtdownloader/icon.png'
         self.add_action(
-            icon_path,
+            os.path.join(os.path.dirname(__file__), 'icon.png'),
             text=self.tr(u'GSI-VTDownloader'),
             callback=self.run,
             parent=self.iface.mainWindow())
 
         # will be set False in run()
         self.first_start = True
-
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
@@ -177,7 +163,6 @@ class VTDownloader:
                 self.tr(u'&GSI-VTDownloader'),
                 action)
             self.iface.removeToolBarIcon(action)
-
 
     def run(self):
         """Run method that performs all the real work"""
